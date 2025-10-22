@@ -1,6 +1,9 @@
 import streamlit as st
 import boto3
 from typing import List, Dict, Any
+import pypdf
+import docx
+
 
 st.set_page_config(
     page_title="AI Chatbot", 
@@ -33,11 +36,92 @@ SUBJECTS = [
     "Asian American Studies"
 ]
 
+def extract_text_from_pdf(file) -> str:
+    """Extract text from PDF file"""
+    try:
+        pdf_reader = pypdf.PdfReader(file)
+        text = ""
+        for page in pdf_reader.pages:
+            text += page.extract_text() + "\n"
+        return text
+    except Exception as e:
+        st.error(f"Error reading PDF: {str(e)}")
+        return ""
+
+def extract_text_from_docx(file) -> str:
+    """Extract text from DOCX file"""
+    try:
+        doc = docx.Document(file)
+        text = ""
+        for paragraph in doc.paragraphs:
+            text += paragraph.text + "\n"
+        return text
+    except Exception as e:
+        st.error(f"Error reading DOCX: {str(e)}")
+        return ""
+
+def extract_text_from_txt(file) -> str:
+    """Extract text from TXT file"""
+    try:
+        return str(file.read(), "utf-8")
+    except Exception as e:
+        st.error(f"Error reading TXT: {str(e)}")
+        return ""
+
+def process_uploaded_file(uploaded_file) -> str:
+    """Process uploaded file and extract text"""
+    file_type = uploaded_file.type
+    
+    if file_type == "application/pdf":
+        return extract_text_from_pdf(uploaded_file)
+    elif file_type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+        return extract_text_from_docx(uploaded_file)
+    elif file_type == "text/plain":
+        return extract_text_from_txt(uploaded_file)
+    else:
+        st.error(f"Unsupported file type: {file_type}")
+        return ""
+
 st.title("🤖 Simple AI Chatbot")
 st.write("Chat with an AI using AWS Bedrock!")
 
 # Sidebar for filters
 with st.sidebar:
+    st.header("📄 Document Upload")
+    
+    uploaded_files = st.file_uploader(
+        "Upload documents",
+        type=['pdf', 'docx', 'txt'],
+        accept_multiple_files=True,
+        help="Upload PDF, DOCX, or TXT files to provide context to the AI"
+    )
+    
+    # Process uploaded files
+    if uploaded_files:
+        if "uploaded_documents" not in st.session_state:
+            st.session_state.uploaded_documents = {}
+        
+        for uploaded_file in uploaded_files:
+            if uploaded_file.name not in st.session_state.uploaded_documents:
+                with st.spinner(f"Processing {uploaded_file.name}..."):
+                    text_content = process_uploaded_file(uploaded_file)
+                    if text_content:
+                        st.session_state.uploaded_documents[uploaded_file.name] = {
+                            "content": text_content,
+                            "size": len(text_content)
+                        }
+                        st.success(f"✅ {uploaded_file.name} processed successfully")
+    
+    # Display uploaded documents
+    if "uploaded_documents" in st.session_state and st.session_state.uploaded_documents:
+        st.header("📚 Uploaded Documents")
+        for doc_name, doc_info in st.session_state.uploaded_documents.items():
+            with st.expander(f"📄 {doc_name} ({doc_info['size']} chars)"):
+                st.text_area("Content preview:", doc_info["content"][:500] + "..." if len(doc_info["content"]) > 500 else doc_info["content"], height=100, disabled=True)
+                if st.button(f"🗑️ Remove {doc_name}", key=f"remove_{doc_name}"):
+                    del st.session_state.uploaded_documents[doc_name]
+                    st.rerun()
+    
     st.header("🔍 Context Filters")
     
     selected_states = st.multiselect("Select States", STATES, default=[])
@@ -47,6 +131,11 @@ with st.sidebar:
     st.header("⚙️ Settings")
     if st.button("Clear Chat History"):
         st.session_state.messages = []
+        st.rerun()
+    
+    if st.button("Clear All Documents"):
+        if "uploaded_documents" in st.session_state:
+            st.session_state.uploaded_documents = {}
         st.rerun()
 
 @st.cache_resource
@@ -67,6 +156,11 @@ def invoke_model(messages: List[Dict[str, str]], context: Dict[str, str] = None)
       context_parts.append(f"Grade Level: {context['grade']}")
     if context.get("subject") and context["subject"] != "All Subjects":
       context_parts.append(f"Subject: {context['subject']}")
+    
+    # Add document content if available
+    if context.get("documents") and len(context["documents"]) > 0:
+      doc_context = "\n\n".join([f"Document '{name}':\n{content}" for name, content in context["documents"].items()])
+      context_parts.append(f"Uploaded Documents:\n{doc_context}")
     
     if context_parts:
       system_message += f" Context: {', '.join(context_parts)}."
@@ -119,6 +213,10 @@ if prompt := st.chat_input("Type your message here..."):
         "grade": selected_grade,
         "subject": selected_subject
       }
+      
+      # Add document content if available
+      if "uploaded_documents" in st.session_state and st.session_state.uploaded_documents:
+        context["documents"] = {name: doc_info["content"] for name, doc_info in st.session_state.uploaded_documents.items()}
       response = invoke_model(st.session_state.messages, context)
   
   st.session_state.messages.append({"role": "assistant", "content": response})
