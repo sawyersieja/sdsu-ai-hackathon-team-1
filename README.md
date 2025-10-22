@@ -25,7 +25,7 @@ pip install -r requirements.txt
 1. Run the Streamlit application:
 
 ```bash
-streamlit run lesson_plan_chatbot.py
+streamlit run app.py
 ```
 
 2. Open your browser and navigate to the provided local URL (typically `http://localhost:8501`)
@@ -60,7 +60,7 @@ streamlit run lesson_plan_chatbot.py
 ## File Structure
 
 ```
-├── lesson_plan_chatbot.py    # Main Streamlit application
+├── app.py                  # Main Streamlit application
 ├── requirements.txt          # Python dependencies
 └── README.md                # This file
 ```
