@@ -1,9 +1,11 @@
 import streamlit as st
 import boto3
 from typing import List, Dict, Any
+import os
 import pypdf
 import docx
 
+# Load environment variables
 
 st.set_page_config(
     page_title="AI Chatbot", 
@@ -139,58 +141,114 @@ with st.sidebar:
         st.rerun()
 
 @st.cache_resource
+def get_rag_client() -> Any:
+  """Client for RAG (Knowledge Base) operations"""
+  return boto3.client(
+    'bedrock-agent-runtime',
+    region_name=os.getenv('AWS_DEFAULT_REGION', 'us-west-2')
+  )
+
+@st.cache_resource
 def get_bedrock_client() -> Any:
-  return boto3.client('bedrock-runtime', region_name='us-west-2')
+  """Client for regular Bedrock LLM operations"""
+  return boto3.client(
+    'bedrock-runtime',
+    region_name=os.getenv('AWS_DEFAULT_REGION', 'us-west-2')
+  )
 
 def invoke_model(messages: List[Dict[str, str]], context: Dict[str, str] = None) -> str:
-  client = get_bedrock_client()
-
-  # Add context information to the system message
-  system_message = "You are a helpful AI assistant."
+  # Get the latest user message
+  user_message = messages[-1]["content"] if messages else ""
+  
+  # Build filter context (for RAG stage)
+  filter_context_parts = []
   if context:
-    context_parts = []
     if context.get("states") and len(context["states"]) > 0:
       states_str = ", ".join(context["states"])
-      context_parts.append(f"States: {states_str}")
+      filter_context_parts.append(f"States: {states_str}")
     if context.get("grade") and context["grade"] != "All Grades":
-      context_parts.append(f"Grade Level: {context['grade']}")
+      filter_context_parts.append(f"Grade Level: {context['grade']}")
     if context.get("subject") and context["subject"] != "All Subjects":
-      context_parts.append(f"Subject: {context['subject']}")
-    
-    # Add document content if available
-    if context.get("documents") and len(context["documents"]) > 0:
-      doc_context = "\n\n".join([f"Document '{name}':\n{content}" for name, content in context["documents"].items()])
-      context_parts.append(f"Uploaded Documents:\n{doc_context}")
-    
-    if context_parts:
-      system_message += f" Context: {', '.join(context_parts)}."
-
-  bedrock_messages: List[Dict[str, Any]] = [
-    {
-      "role": "user",
-      "content": [{"text": system_message}]
-    }
-  ]
+      filter_context_parts.append(f"Subject: {context['subject']}")
   
-  for msg in messages:
-    bedrock_messages.append({
-      "role": msg["role"],
-      "content": [{"text": msg["content"]}]
-    })
-
+  # STAGE 1: Get RAG response from Knowledge Base
+  rag_response = ""
   try:
-    response = client.converse(
+    rag_client = get_rag_client()
+    
+    # Build RAG input with filters only
+    rag_input = "You are a helpful assistant. Always respond in clear, concise sentences. When you use information from the knowledge base, cite it at the end."
+    
+    if filter_context_parts:
+      rag_input += f"\n\nContext: {', '.join(filter_context_parts)}."
+    
+    rag_input += f"\n\nUser question: {user_message}"
+    
+    # Call RAG model
+    rag_response_obj = rag_client.retrieve_and_generate(
+      input={'text': rag_input},
+      retrieveAndGenerateConfiguration={
+        'type': 'KNOWLEDGE_BASE',
+        'knowledgeBaseConfiguration': {
+          'knowledgeBaseId': os.getenv('KNOWLEDGE_BASE_ID'),
+          'modelArn': f'arn:aws:bedrock:{os.getenv("AWS_DEFAULT_REGION", "us-west-2")}::foundation-model/{os.getenv("BEDROCK_MODEL_ID", "anthropic.claude-3-5-sonnet-20241022-v2:0")}'
+        }
+      }
+    )
+    
+    rag_response = rag_response_obj['output']['text']
+    
+  except Exception as e:
+    rag_response = f"RAG model encountered an error: {str(e)}"
+  
+  # STAGE 2: Use regular Bedrock LLM to synthesize RAG response with uploaded documents
+  try:
+    bedrock_client = get_bedrock_client()
+    
+    # Build comprehensive context for regular LLM
+    synthesis_prompt = f"""You are a helpful assistant that synthesizes information from multiple sources.
+
+RAG Model Response (from Knowledge Base):
+{rag_response}
+
+User's Question: {user_message}
+
+Filter Context: {', '.join(filter_context_parts) if filter_context_parts else 'No specific filters applied'}
+
+Please provide a comprehensive response that:
+1. Incorporates the RAG model's response
+2. Compares and synthesizes it with any uploaded documents (if provided)
+3. Maintains the filter context (states, grade level, subject)
+4. Provides a well-structured, helpful answer
+
+If there are uploaded documents, please analyze them in relation to the RAG response and user question."""
+
+    # Add uploaded documents if available
+    if context and context.get("documents") and len(context["documents"]) > 0:
+      synthesis_prompt += "\n\nUploaded Documents:\n"
+      for name, content in context["documents"].items():
+        synthesis_prompt += f"\n--- Document: {name} ---\n{content}\n"
+    
+    # Call regular Bedrock LLM
+    bedrock_messages = [
+      {
+        "role": "user",
+        "content": [{"text": synthesis_prompt}]
+      }
+    ]
+    
+    response = bedrock_client.converse(
       modelId="anthropic.claude-3-5-sonnet-20241022-v2:0",
       messages=bedrock_messages,
       inferenceConfig={
-        "maxTokens": 1000,
+        "maxTokens": 2000,
       }
     )
-
+    
     return response['output']['message']['content'][0]['text']
 
   except Exception as e:
-    return f"Sorry, I encountered an error: {str(e)}"
+    return f"Sorry, I encountered an error in the synthesis stage: {str(e)}"
 
 if "messages" not in st.session_state:
   st.session_state.messages = []
