@@ -9,7 +9,7 @@ import docx
 #load_dotenv()
 
 st.set_page_config(
-    page_title="AI Chatbot", 
+    page_title="Alignment Chatbot", 
     page_icon="🤖",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -85,7 +85,7 @@ def process_uploaded_file(uploaded_file) -> str:
         st.error(f"Unsupported file type: {file_type}")
         return ""
 
-st.title("🤖 Simple AI Chatbot")
+st.title("🤖 Standards Alignment Helper")
 st.write("Chat with an AI using AWS Bedrock!")
 
 # Sidebar for filters
