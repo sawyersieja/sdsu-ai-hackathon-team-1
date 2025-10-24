@@ -370,6 +370,9 @@ FILTER CONTEXT: {', '.join(filter_context_parts) if filter_context_parts else 'N
 KNOWLEDGE BASE MATCHES:
 {matches_text}
 
+STATE STANDARDS SUMMARY:
+{state_requirements_response}
+
 Please provide:
 1. Specific feedback using the knowledge base content
 2. Quote relevant sections with proper citations (use format: "Quote text" [Citation #])
