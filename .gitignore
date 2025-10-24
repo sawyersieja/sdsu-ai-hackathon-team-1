@@ -1,2 +1,29 @@
-# Virtual environment
+# Python basics
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+
+# Virtual env
+.venv/
 venv/
+
+# Env & secrets
+.env
+.streamlit/secrets.toml
+
+# OS/editor cruft
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Logs & caches (keep this light)
+*.log
+.pytest_cache/
+.mypy_cache/
+.cache/
+
+# Local artifacts you don’t want in git
+*.json
