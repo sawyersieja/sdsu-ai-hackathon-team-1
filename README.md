@@ -103,7 +103,7 @@ streamlit run app.py
 #### 2. Set Filters
 - **States**: Select relevant US states for geographic filtering
 - **Grade Level**: Choose from Kindergarten through 12th grade
-- **Subject**: Currently supports Asian American Studies
+- **Subject**: Currently supports English, Social Studies, U.S. History, and World History from AsianAmericanEDU.org!
 
 #### 3. Chat with AI
 - Type your questions in the chat input
