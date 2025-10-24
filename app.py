@@ -178,6 +178,34 @@ def get_bedrock_client() -> Any:
     region_name=os.getenv('AWS_DEFAULT_REGION', 'us-west-2')
   )
 
+ALIGNMENT_SYSTEM_PROMPT = """You are an education alignment specialist.
+You ONLY use information provided in the user message/context. Do NOT invent or assume facts not present in the provided text.
+If a lesson or passage does not clearly meet a standard, write exactly: "No direct match found."
+
+When aligning content:
+- Identify the exact standard code (e.g., CA.ELA.4.RL.3.1) when present in the provided context.
+- Quote only the minimal relevant text (no long dumps).
+- Provide a one-sentence justification.
+- If multiple candidate standards appear, list each as separate bullets with quote + justification.
+- If insufficient evidence, say "No direct match found." and briefly explain what is missing.
+"""
+
+def get_generation_config(low_creativity: bool = True) -> dict:
+    if low_creativity:
+        return {
+            "maxTokens": 1500,
+            "temperature": 0.2,
+            "topP": 0.5,
+            #"topK": 40,
+        }
+    else:
+        return {
+            "maxTokens": 1500,
+            "temperature": 0.7,
+            "topP": 0.9,
+            #"topK": 100,
+        }
+
 def invoke_model(messages: List[Dict[str, str]], context: Dict[str, str] = None) -> str:
   # Get the latest user message
   user_message = messages[-1]["content"] if messages else ""
@@ -204,28 +232,49 @@ def invoke_model(messages: List[Dict[str, str]], context: Dict[str, str] = None)
       
       # Process each uploaded document (state requirements)
       for name, content in context["documents"].items():
-        state_prompt = f"""Analyze the following state requirements document and provide feedback on how it relates to the user's question.
+        state_prompt = f"""
+          ROLE: You are an education alignment specialist. Use ONLY the provided document content. If a standard is not explicitly supported by the content, write exactly: "No direct match found."
 
-DOCUMENT: {name}
-CONTENT: {content}
+          USER QUESTION
+          {user_message}
 
-USER QUESTION: {user_message}
-FILTER CONTEXT: {', '.join(filter_context_parts) if filter_context_parts else 'No specific filters'}
+          FILTER CONTEXT
+          {', '.join(filter_context_parts) if filter_context_parts else 'No specific filters'}
 
-Please provide:
-1. Key requirements from the document
-2. How these requirements relate to the user's question
-3. Specific feedback on alignment or gaps
-4. Recommendations based on the state requirements
+          DOCUMENT NAME
+          {name}
 
-Focus on being specific and citing exact requirements from the document."""
+          DOCUMENT CONTENT
+          {content}
 
-        state_messages = [{"role": "user", "content": [{"text": state_prompt}]}]
+          TASK
+          Analyze the document content against the user question and (if applicable) state standards in scope for the filters. Base every claim on explicit text in the document.
+
+          INSTRUCTIONS
+          - If you find an alignment, identify the exact standard code (e.g., CA.ELA.4.RL.3.1) ONLY if it appears in or is directly inferable from the document content.
+          - Quote the minimal relevant passage(s) from the document (short quotes).
+          - Provide a one-sentence justification for each quoted passage explaining the match.
+          - If multiple standards are supported, list each as a separate bullet with quote + justification.
+          - If evidence is insufficient or the document does not support the user’s request, output "No direct match found." and state what evidence is missing.
+
+          OUTPUT FORMAT
+          - "Summary": 1–3 sentences.
+          - "Matches": bullet list; each bullet: **StandardCode (if present)** — "short quote" — one-sentence justification.
+          - "Gaps/Notes": bullet list of missing evidence or caveats.
+
+          STRICTNESS
+          Do not invent standards, codes, or facts not present in the document content. Prefer precision over breadth.
+          """
+
+        state_messages = [
+          {"role": "user", "content": [{"text": state_prompt}]}
+        ]
         
         state_response = bedrock_client.converse(
           modelId="anthropic.claude-3-5-sonnet-20241022-v2:0",
+          system=[{"text": ALIGNMENT_SYSTEM_PROMPT}],
           messages=state_messages,
-          inferenceConfig={"maxTokens": 1500}
+          inferenceConfig=get_generation_config(low_creativity=True)
         )
         
         state_requirements_response += f"\n\n--- ANALYSIS OF {name} ---\n"
@@ -362,33 +411,53 @@ Focus on being specific and citing exact requirements from the document."""
         else:
           citations_list.append(f"[{citation_info['match_number']}] {citation_info['source']} - {citation_info['location']}")
       
-      knowledge_prompt = f"""Based on the following matches from our knowledge base, provide feedback on the user's question.
+      knowledge_prompt = f"""
+        ROLE: You are an education alignment specialist. Use ONLY the provided knowledge-base matches. If a standard is not explicitly supported by the matches, write exactly: "No direct match found."
 
-USER QUESTION: {user_message}
-FILTER CONTEXT: {', '.join(filter_context_parts) if filter_context_parts else 'No specific filters'}
+        USER QUESTION
+        {user_message}
 
-KNOWLEDGE BASE MATCHES:
-{matches_text}
+        FILTER CONTEXT
+        {', '.join(filter_context_parts) if filter_context_parts else 'No specific filters'}
 
-Please provide:
-1. Specific feedback using the knowledge base content
-2. Quote relevant sections with proper citations (use format: "Quote text" [Citation #])
-3. Explain how the matches relate to the user's question
-4. Highlight key insights from the knowledge base
+        KNOWLEDGE BASE MATCHES
+        {matches_text}
 
-CITATION FORMAT: When quoting, use this format: "Exact quote text" [1] where the number refers to the citation list below.
+        CITATION FORMAT
+        When quoting, append a bracketed citation index that maps to the CITATIONS list below. Example: "short quote" [1]
 
-CITATIONS:
-{chr(10).join(citations_list)}
+        CITATIONS
+        {chr(10).join(citations_list)}
 
-CRITICAL: Always provide proper citations with [number] format when referencing knowledge base content."""
+        TASK
+        Synthesize the retrieved matches to answer the user’s question and align content to relevant state standards, strictly grounded in the retrieved text.
 
-      knowledge_messages = [{"role": "user", "content": [{"text": knowledge_prompt}]}]
+        INSTRUCTIONS
+        - Use only the text in KNOWLEDGE BASE MATCHES.
+        - For each claimed alignment, identify the exact standard code ONLY if present or directly stated in the matches.
+        - Provide minimal quotes supporting each claim and include bracketed citations like [1], [2], etc., that correspond to the CITATIONS list.
+        - Provide a one-sentence justification per quote explaining the alignment.
+        - If multiple distinct standards are supported, list each as a separate bullet with quote + justification + citation.
+        - If evidence is insufficient, output "No direct match found." and briefly state what is missing.
+
+        OUTPUT FORMAT
+        - "Summary": 1–3 sentences.
+        - "Matches": bullet list; each bullet: **StandardCode (if present)** — "short quote" [n] — one-sentence justification.
+        - "Gaps/Notes": bullet list of missing evidence or caveats.
+
+        STRICTNESS
+        Do not invent standards, codes, URLs, or facts. Prefer precision over breadth.
+        """
+
+      knowledge_messages = [
+        {"role": "user", "content": [{"text": knowledge_prompt}]}
+      ]
       
       knowledge_response = bedrock_client.converse(
         modelId="anthropic.claude-3-5-sonnet-20241022-v2:0",
+        system=[{"text": ALIGNMENT_SYSTEM_PROMPT}],
         messages=knowledge_messages,
-        inferenceConfig={"maxTokens": 1500}
+        inferenceConfig=get_generation_config(low_creativity=True)
       )
       
       knowledge_base_response = knowledge_response['output']['message']['content'][0]['text']
