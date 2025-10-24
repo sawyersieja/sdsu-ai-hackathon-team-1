@@ -4,10 +4,9 @@ from typing import List, Dict, Any
 import os
 import pypdf
 import docx
-from dotenv import load_dotenv
 
 # Load environment variables from .env file
-load_dotenv()
+#load_dotenv()
 
 st.set_page_config(
     page_title="AI Chatbot", 
@@ -37,7 +36,7 @@ GRADE_LEVELS = [
 ]
 
 SUBJECTS = [
-    "Asian American Studies"
+    "English", "Social Studies", "U.S. History", "World History"
 ]
 
 def extract_text_from_pdf(file) -> str:
