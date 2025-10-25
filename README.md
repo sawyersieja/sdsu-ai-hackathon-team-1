@@ -50,7 +50,7 @@ pip install -r requirements.txt
 ```
 
 4. **Configure environment variables**:
-Create a `.env` file in the project root with the following variables:
+Export the following variables in your terminal:
 
 ```bash
 # AWS Configuration
