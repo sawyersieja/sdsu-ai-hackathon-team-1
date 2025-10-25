@@ -49,19 +49,6 @@ source venv/bin/activate  # On Windows: venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-4. **Configure environment variables**:
-Create a `.env` file in the project root with the following variables:
-
-```bash
-# AWS Configuration
-AWS_DEFAULT_REGION=us-west-2
-AWS_ACCESS_KEY_ID=your_access_key_here
-AWS_SECRET_ACCESS_KEY=your_secret_key_here
-
-# Bedrock Knowledge Base
-KNOWLEDGE_BASE_ID=your_knowledge_base_id_here
-```
-
 **Required Environment Variables**:
 - `AWS_DEFAULT_REGION`: AWS region for Bedrock services (default: us-west-2)
 - `AWS_ACCESS_KEY_ID`: Your AWS access key
